@@ -144,6 +144,35 @@ let synth ?(options = default_synth_options) spec m n =
         after removing the upperset of the chosen predicate
      4. continue in DFS manner
   *)
+  let weakerps fn_commute h_prefix minp l = 
+    let rec foldl f ps l acc =
+      match ps with
+      | [] -> acc 
+      | p::ps' ->       
+        let p_cbys = L.coveredbyset p l in
+        begin match p_cbys with
+          | [] -> foldl f ps' l (f p acc)
+          | _ -> 
+            let acc' = foldl f p_cbys l acc in
+            match acc' with
+            | [] -> f p acc'
+            | _ -> acc'
+        end
+    in
+    let commutef p acc = 
+      let p_ = fst p in 
+      let h_ = add_conjunct (exp_of_predP p_) h_prefix in
+      match solve_inst [] @@ fn_commute spec h_ with
+        | Unsat ->
+          pfv "\nWeaker predicate found: %s" (string_of_predP p_);
+          p_::acc 
+        | Unknown -> raise @@ Failure "commute failure"
+        | Sat _ -> acc
+    in
+    match foldl commutef (L.coveredbyset minp l) l [] with
+    | [] -> [fst minp]
+    | wps -> wps
+  in
 
   (* preh is the h of the last iteration, maybep is Some predicate that was added last iteration. *)
   let rec refine_wrapped preh maybep l = 
@@ -159,17 +188,46 @@ let synth ?(options = default_synth_options) spec m n =
     
     begin match solve_inst pred_smt @@ commute spec h with
       | Unsat -> 
-        pfv "\nPred found for phi: %s\n" 
-          (string_of_smt @@ smt_of_conj h);
-        phi := add_disjunct h !phi
+        begin match maybep with
+          | None ->
+             pfv "\nPartial solution for phi: %s\n" 
+               (string_of_smt @@ smt_of_conj h);
+             phi := add_disjunct h !phi
+          | Some p -> 
+            pfv "\nPred found for phi: %s" (string_of_predP (fst p));
+            let wps = weakerps commute preh p l in
+            pfv "\nWeakers predicates found for phi: [%s]"
+              (String.concat " ; " (List.map (string_of_predP) wps));
+            List.iter (fun p_ ->
+                let p' = exp_of_predP p_ in
+                let h' = add_conjunct p' preh in
+                pfv "\nPartial solution for phi: %s\n" 
+                  (string_of_smt @@ smt_of_conj h');
+                phi := add_disjunct h' !phi
+              ) wps
+        end
       | Unknown -> raise @@ Failure "commute failure"
       | Sat vs -> 
         let com_cex = pred_data_of_values vs in
         begin match solve_inst pred_smt @@ non_commute spec h with
           | Unsat ->
-            pfv "\nPred found for phi-tilde: %s\n" 
-              (string_of_smt @@ smt_of_conj h);
-            phi_tilde := add_disjunct h !phi_tilde
+            begin match maybep with
+              | None ->
+                 pfv "\nPartial solution for phi-tilde: %s\n" 
+                   (string_of_smt @@ smt_of_conj h);
+                 phi_tilde := add_disjunct h !phi_tilde
+              | Some p -> 
+                pfv "\nPred found for phi-tilde: %s" (string_of_predP (fst p));
+                let wps = weakerps non_commute preh p l in
+                pfv "\nWeakers predicates found for phi-tilde: [%s]"
+                  (String.concat " ; " (List.map (string_of_predP) wps));
+                List.iter (fun p_ ->
+                    let p' = exp_of_predP p_ in
+                    let h' = add_conjunct p' preh in
+                    pfv "\nPartial solution for phi-tilde: %s\n" 
+                      (string_of_smt @@ smt_of_conj h');
+                    phi_tilde := add_disjunct h' !phi_tilde) wps
+            end
           | Unknown -> raise @@ Failure "non_commute failure"
           | Sat vs -> 
             let non_com_cex = pred_data_of_values vs in
