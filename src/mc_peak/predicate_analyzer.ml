@@ -9,6 +9,7 @@ type 'a maybeRes = Exn of string | Val of 'a
 module type PredicateAnalyzerSig = 
 sig
   val run_mc: spec -> method_spec -> method_spec -> pred list -> (predP * mc_result * mc_result) list
+  val run_mc_in_context: spec -> method_spec -> method_spec -> predP list -> pred list -> (predP * mc_result * mc_result) list
   val observe_rels: (module Prover) -> spec -> method_spec -> method_spec ->pred list -> (predP * predP * int) list
 end
 
@@ -73,6 +74,9 @@ struct
 
   let state_mc = curry3 @@ memoize (fun (spec, m1, m2) ->
       Model_counter.count_state spec m1 m2)
+
+  let context_mc = curry4 @@ memoize (fun (spec, m1, m2, h) ->
+      Model_counter.count_conj spec m1 m2 h)
       
   let run_mc = 
     fun spec m1 m2 ps ->
@@ -80,6 +84,19 @@ struct
         let p = P p' in
         let p_mc = Model_counter.count_pred spec m1 m2 p in
         let not_p_mc = match p_mc, state_mc spec m1 m2 with
+          | Sat x, Sat s -> Sat (s-x)
+          | Sat _, stmc -> stmc
+          | Unsat, stmc -> stmc
+          | Unknown, stmc -> Unknown
+        in 
+        (p, p_mc, not_p_mc) :: acc) [] ps
+
+  let run_mc_in_context = 
+    fun spec m1 m2 h ps ->     
+    List.fold_left (fun acc p' ->
+        let p = P p' in
+        let p_mc = Model_counter.count_conj spec m1 m2 (p::h) in
+        let not_p_mc = match p_mc, context_mc spec m1 m2 h with
           | Sat x, Sat s -> Sat (s-x)
           | Sat _, stmc -> stmc
           | Unsat, stmc -> stmc
@@ -191,3 +208,20 @@ let run_mc = fun spec m1 m2 ps ->
   in
   pred_mcs_simplified
     
+let run_mc_in_context = fun spec m1 m2 h ps ->
+  let module PA = PredicateAnalyzer in
+  let pred_mcs = PA.run_mc_in_context spec m1 m2 h ps in
+  let module PAL = Predicate_analyzer_logger in
+  PAL.log_predicates_mc "Predicates MODEL COUNT Summary" ps pred_mcs;
+  let pred_mcs_simplified = 
+    List.flatten @@ (List.map (fun (p, p_mc, notp_mc) -> 
+        match p_mc, notp_mc with
+        | Sat v, Sat v' -> 
+          let r = (float_of_int v) /. (float_of_int v') in 
+          let delta_p = 0.5 *. (r -. 1.) /. (r +. 1.) in     (* delta_p    = 0.5*(v-v')/(v+v') *)
+          let delta_notp = 0.5 *. (1. -. r) /. (r +. 1.) in  (* delta_notp = 0.5*(v'-v)/(v+v') *)
+          [(p, delta_p); (negate p, delta_notp)]
+        | ( Sat v, Unsat | Sat v, Unknown )  -> []
+        | ( Unsat, _ | Unknown, _ ) -> []) pred_mcs ) 
+  in
+  pred_mcs_simplified

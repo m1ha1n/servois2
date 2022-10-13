@@ -140,7 +140,8 @@ let pmcs_memo: (predP * float) list ref = ref []
 let mc_run_time = ref 0.0
 (* choose the minimal object with the highest rank *)
 let mcpred env ps = 
-  let pmcs_miss = List.filter (fun p -> not (List.exists (compose ((=) p) fst) !pmcs_memo)) ps in
+  (* let pmcs_miss = List.filter (fun p -> not (List.exists (compose ((=) p) fst) !pmcs_memo)) ps in *)
+  let pmcs_miss = ps in
   let pmcs = match pmcs_miss with
     | [] -> !pmcs_memo
     | pmcs_miss -> 
@@ -151,10 +152,19 @@ let mcpred env ps =
           end
         ) [] pmcs_miss in
       let start = Unix.gettimeofday () in
-      let pmcs_ = Predicate_analyzer.run_mc env.spec env.m_spec env.n_spec pmcs_miss' in
-      pmcs_memo := pmcs_ @ !pmcs_memo;
+      (* let pmcs_ = Predicate_analyzer.run_mc env.spec env.m_spec env.n_spec pmcs_miss' in
+      pmcs_memo := pmcs_ @ !pmcs_memo; *)
+      let h = List.flatten @@ List.map (fun mp -> 
+          match predP_of_atom mp with 
+          | Some p_ -> [p_] 
+          | None -> []
+        ) (un_conj env.h) 
+      in 
+      let pmcs_ = Predicate_analyzer.run_mc_in_context env.spec env.m_spec env.n_spec h pmcs_miss' in 
+      (* cooment above to revert to previous version  *)
       mc_run_time := !mc_run_time +. ((Unix.gettimeofday ()) -. start);
-      !pmcs_memo
+      (* !pmcs_memo *)
+      pmcs_
   in
   List.map (fun p -> (p, List.assoc p pmcs)) ps 
         

@@ -29,6 +29,7 @@ module type PredicateModelCountSig =
 sig
   val count_state: spec -> method_spec -> method_spec -> mc_result
   val count_pred: spec -> method_spec -> method_spec -> predP -> mc_result
+  val count_conj: spec -> method_spec -> method_spec -> predP list -> mc_result
 end
 
 module ABCModelCounter : ModelCounterSig = 
@@ -148,8 +149,24 @@ struct
       ) 
     in 
     run_mc string_of_mc_query
+
+  let count_conj spec m1 m2 ps = 
+    let string_of_conj = match ps with
+      | [] -> "true"
+      | ps_ -> sp "(and %s)" (String.concat " " (List.map string_of_predP ps)) in
+    pfv "\nCount CONJ: %s" string_of_conj;
+    let string_of_mc_query = unlines ~trailing_newline: true (
+        ["(set-logic ALL)"] @
+        (vars_strings spec m1 m2) @
+        [sp "(assert %s)" string_of_conj] @
+        ["(check-sat)"]
+      ) 
+    in 
+    run_mc string_of_mc_query
+
 end
 
 let count_state = PredicateModelCount.count_state 
 let count_pred = PredicateModelCount.count_pred
+let count_conj = PredicateModelCount.count_conj
  

@@ -21,6 +21,7 @@ let curry f x y = f (x, y)
 let uncurry f (x, y) = f x y
 
 let curry3 f x y z = f (x, y, z)
+let curry4 f x y z t = f (x, y, z, t)
 
 let remove (x : 'a) : 'a list -> 'a list = List.filter (fun x' -> x' != x)
 
